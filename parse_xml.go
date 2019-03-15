@@ -4,17 +4,16 @@ import (
 	"encoding/xml"
 )
 
-type SplunkResponse struct {
-	SplunkFeed
-	Response []SplunkMessage `xml:"messages>msg"`
+type MessagesResponse struct {
+	Messages []Message `xml:"messages>msg"`
 }
 
-type SplunkMessage struct {
+type Message struct {
 	Type string `xml:"type,attr"`
 	Msg  string `xml:",chardata"`
 }
 
-type SplunkFeed struct {
+type Feed struct {
 	TotalResults int     `xml:"totalResults"`
 	ItemsPerPage int     `xml:"itemsPerPage"`
 	StartIndex   int     `xml:"startIndex"`

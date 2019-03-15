@@ -5,17 +5,21 @@ import (
 	"net/url"
 	"bytes"
 	"fmt"
-	//"flag"
 	"encoding/xml"
-	"errors"
 	"io/ioutil"
 )
 
-type SplunkSearch map[string]SType
+type Response struct {
+	Feed
+	MessagesResponse
+	httpResponse *http.Response
+}
 
-func (s *SplunkSearch) toStringMap() map[string]string {
+type Search map[string]SType
+
+func (s Search) toStringMap() map[string]string {
 	ret := make(map[string]string)
-	for k, v := range *s {
+	for k, v := range s {
 		switch {
 		case v.List != nil, v.Map != nil:
 			fmt.Println("don't really know what to do with this one:", k)
@@ -26,9 +30,9 @@ func (s *SplunkSearch) toStringMap() map[string]string {
 	return ret
 }
 
-func (s *SplunkSearch) Encode() []byte {
+func (s Search) Encode() []byte {
 	ret := url.Values{}
-	for k, v := range *s {
+	for k, v := range s {
 		switch {
 		case v.List != nil:
 			for _, i := range v.List {
@@ -48,7 +52,17 @@ func (s *SplunkSearch) Encode() []byte {
 	return []byte(ret.Encode())
 }
 
-type SplunkClient struct {
+type SError struct {
+	StatusCode int
+	Status string
+	Messages []Message
+}
+
+func (err SError) Error() string {
+	return fmt.Sprintf("service returned %s: %s", err.Status, err.Messages)
+}
+
+type Client struct {
 	Username string
 	Password string
 	Endpoint string
@@ -56,7 +70,7 @@ type SplunkClient struct {
 	Client   *http.Client
 }
 
-func (c SplunkClient) makeRequest(method string, path string, body []byte) (*http.Request, error) {
+func (c Client) makeRequest(method string, path string, body []byte) (*http.Request, error) {
 	req, err := http.NewRequest(method, c.Endpoint+c.ApiPath+path, bytes.NewReader(body))
 	req.SetBasicAuth(c.Username, c.Password)
 
@@ -66,7 +80,7 @@ func (c SplunkClient) makeRequest(method string, path string, body []byte) (*htt
 	return req, nil
 }
 
-func (c SplunkClient) execRequest(r *http.Request) (*SplunkResponse, error) {
+func (c Client) execRequest(r *http.Request) (*Response, error) {
 	resp, err := c.Client.Do(r)
 	if err != nil {
 		return nil, err
@@ -80,7 +94,7 @@ func (c SplunkClient) execRequest(r *http.Request) (*SplunkResponse, error) {
 		return nil, err
 	}
 
-	var res SplunkResponse
+	res := Response{httpResponse: resp}
 	if err := xml.Unmarshal(body, &res); err != nil {
 		return nil, err
 	}
@@ -88,18 +102,22 @@ func (c SplunkClient) execRequest(r *http.Request) (*SplunkResponse, error) {
 	return &res, nil
 }
 
-func (s *SplunkClient) getSplunkSearches(r *SplunkResponse) ([]SplunkSearch, error) {
+func (s *Client) getSearches(r *Response) ([]Search, error) {
 	if r.Entries == nil {
-		return nil, errors.New(fmt.Sprint(r.Response))
+		return nil, SError{
+			StatusCode: r.httpResponse.StatusCode,
+			Status: r.httpResponse.Status,
+			Messages: r.Messages,
+		}
 	}
 
 	fmt.Println(len(r.Entries))
-	s0 := SplunkSearch(r.Entries[0].Content.Map)
+	s0 := Search(r.Entries[0].Content.Map)
 	fmt.Println("search[0] = ", s0.toStringMap())
 
-	searches := make([]SplunkSearch, len(r.Entries))
+	searches := make([]Search, len(r.Entries))
 	for i, e := range r.Entries {
-		ss := SplunkSearch(e.Content.Map)
+		ss := Search(e.Content.Map)
 		ss["name"] = SType{Str: e.Title}
 		searches[i] = ss
 	}
@@ -107,7 +125,7 @@ func (s *SplunkClient) getSplunkSearches(r *SplunkResponse) ([]SplunkSearch, err
 	return searches, nil
 }
 
-func (c SplunkClient) ListSearches() ([]SplunkSearch, error) {
+func (c Client) ListSearches() ([]Search, error) {
 	req, err := c.makeRequest("GET", "/saved/searches", nil)
 	if err != nil {
 		return nil, err
@@ -118,7 +136,7 @@ func (c SplunkClient) ListSearches() ([]SplunkSearch, error) {
 		return nil, err
 	}
 
-	searches, err := c.getSplunkSearches(res)
+	searches, err := c.getSearches(res)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +144,7 @@ func (c SplunkClient) ListSearches() ([]SplunkSearch, error) {
 	return searches, nil
 }
 
-func (c SplunkClient) GetSearch(name string) (*SplunkSearch, error) {
+func (c Client) GetSearch(name string) (Search, error) {
 	req, err := c.makeRequest("GET", "/saved/searches/"+name, nil)
 	if err != nil {
 		return nil, err
@@ -137,29 +155,32 @@ func (c SplunkClient) GetSearch(name string) (*SplunkSearch, error) {
 		return nil, err
 	}
 
-	searches, err := c.getSplunkSearches(res)
+	searches, err := c.getSearches(res)
 	if err != nil {
 		return nil, err
 	}
 
-	return &searches[0], nil
+	return searches[0], nil
 }
 
-func (c SplunkClient) DeleteSearch(name string) (*SplunkResponse, error) {
+func (c Client) DeleteSearch(name string) (*Response, error) {
 	req, err := c.makeRequest("DELETE", "/saved/searches/"+name, nil)
 	if err != nil {
 		return nil, err
 	}
 
 	res, err := c.execRequest(req)
-	if res.Entries == nil {
-		return nil, errors.New(fmt.Sprint(res.Response))
+	if res.httpResponse.StatusCode == 404 {
+		return res, SError{
+			Status: res.httpResponse.Status,
+			StatusCode: res.httpResponse.StatusCode,
+			Messages: res.Messages,
+		}
 	}
-
 	return res, nil
 }
 
-func (c SplunkClient) SetSearch(search SplunkSearch) (*SplunkSearch, error) {
+func (c Client) SetSearch(search Search) (Search, error) {
 	req, err := c.makeRequest("HEAD", "/saved/searches/"+search["name"].Str, nil)
 	if err != nil {
 		return nil, err
@@ -178,11 +199,14 @@ func (c SplunkClient) SetSearch(search SplunkSearch) (*SplunkSearch, error) {
 		fmt.Println("Search", search["name"].Str, "already exists, updating it")
 		return c.UpdateSearch(search)
 	default:
-		return nil, errors.New(fmt.Sprint(resp))
+		return nil, SError{
+			Status: resp.Status,
+			StatusCode: resp.StatusCode,
+		}
 	}
 }
 
-func (c SplunkClient) NewSearch(search SplunkSearch) (*SplunkSearch, error) {
+func (c Client) NewSearch(search Search) (Search, error) {
 	req, err := c.makeRequest("POST", "/saved/searches", search.Encode())
 	if err != nil {
 		return nil, err
@@ -193,17 +217,17 @@ func (c SplunkClient) NewSearch(search SplunkSearch) (*SplunkSearch, error) {
 		return nil, err
 	}
 
-	searches, err := c.getSplunkSearches(res)
+	searches, err := c.getSearches(res)
 	if err != nil {
 		return nil, err
 	}
 
-	return &searches[0], nil
+	return searches[0], nil
 }
 
-func (c SplunkClient) UpdateSearch(search SplunkSearch) (*SplunkSearch, error) {
+func (c Client) UpdateSearch(search Search) (Search, error) {
 	// if the body contains "name" you get an error, so copy out everything except "name"
-	body := SplunkSearch{}
+	body := Search{}
 	for k, v := range search {
 		if k != "name" {
 			body[k] = v
@@ -220,11 +244,11 @@ func (c SplunkClient) UpdateSearch(search SplunkSearch) (*SplunkSearch, error) {
 		return nil, err
 	}
 
-	searches, err := c.getSplunkSearches(res)
+	searches, err := c.getSearches(res)
 	if err != nil {
 		return nil, err
 	}
 
-	return &searches[0], nil
+	return searches[0], nil
 }
 

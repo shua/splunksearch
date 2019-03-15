@@ -1,9 +1,7 @@
 package splunksearch
 
 import (
-	//"fmt"
 	"encoding/xml"
-	"io/ioutil"
 	"log"
 	"testing"
 )
@@ -61,14 +59,14 @@ func Test_Feed(t *testing.T) {
 	</feed>
 	`
 
-	var x SplunkFeed
+	var x Feed
 
 	if err := xml.Unmarshal([]byte(testFeed), &x); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func Test_SplunkResponse(t *testing.T) {
+func Test_Response(t *testing.T) {
 	response := `
 	<response>
 		<messages>
@@ -77,7 +75,7 @@ func Test_SplunkResponse(t *testing.T) {
 	</response>
 	`
 
-	var x SplunkResponse
+	var x Response
 
 	if err := xml.Unmarshal([]byte(response), &x); err != nil {
 		log.Fatal(err)
