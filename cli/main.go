@@ -1,10 +1,10 @@
 package main
 
 import (
-	"net/http"
 	"fmt"
-	"os"
 	spk "github.com/shua/splunksearch"
+	"net/http"
+	"os"
 )
 
 func usage() {

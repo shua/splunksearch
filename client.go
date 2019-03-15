@@ -1,12 +1,12 @@
 package splunksearch
 
 import (
+	"bytes"
+	"encoding/xml"
+	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/url"
-	"bytes"
-	"fmt"
-	"encoding/xml"
-	"io/ioutil"
 )
 
 type Response struct {
@@ -54,8 +54,8 @@ func (s Search) Encode() []byte {
 
 type SError struct {
 	StatusCode int
-	Status string
-	Messages []Message
+	Status     string
+	Messages   []Message
 }
 
 func (err SError) Error() string {
@@ -106,8 +106,8 @@ func (s *Client) getSearches(r *Response) ([]Search, error) {
 	if r.Entries == nil {
 		return nil, SError{
 			StatusCode: r.httpResponse.StatusCode,
-			Status: r.httpResponse.Status,
-			Messages: r.Messages,
+			Status:     r.httpResponse.Status,
+			Messages:   r.Messages,
 		}
 	}
 
@@ -172,9 +172,9 @@ func (c Client) DeleteSearch(name string) (*Response, error) {
 	res, err := c.execRequest(req)
 	if res.httpResponse.StatusCode == 404 {
 		return res, SError{
-			Status: res.httpResponse.Status,
+			Status:     res.httpResponse.Status,
 			StatusCode: res.httpResponse.StatusCode,
-			Messages: res.Messages,
+			Messages:   res.Messages,
 		}
 	}
 	return res, nil
@@ -200,7 +200,7 @@ func (c Client) SetSearch(search Search) (Search, error) {
 		return c.UpdateSearch(search)
 	default:
 		return nil, SError{
-			Status: resp.Status,
+			Status:     resp.Status,
 			StatusCode: resp.StatusCode,
 		}
 	}
@@ -251,4 +251,3 @@ func (c Client) UpdateSearch(search Search) (Search, error) {
 
 	return searches[0], nil
 }
-
